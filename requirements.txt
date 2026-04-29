@@ -1,0 +1,7 @@
+streamlit
+langchain
+langchain-ollama
+pandas
+python-docx
+openpyxl
+pdfplumber
