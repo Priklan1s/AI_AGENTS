@@ -1,7 +1,10 @@
 streamlit
 langchain
+langchain-core
 langchain-ollama
-pandas
+langgraph
+chromadb
+pypdf
 python-docx
+pandas
 openpyxl
-pdfplumber
