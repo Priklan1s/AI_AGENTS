@@ -1,7 +1,7 @@
 streamlit
 langchain
 langchain-ollama
-langgraph
-pypdf
+pandas
 python-docx
-httpx
+openpyxl
+pdfplumber
