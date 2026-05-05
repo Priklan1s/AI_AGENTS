@@ -1,209 +1,232 @@
 import streamlit as st
 from graph.workflow import graph
+from parsing.pdf_parser import load_pdf_text
 from docx import Document
-import pandas as pd
-from io import BytesIO, StringIO
-import csv
-import pdfplumber
+from knowledge_base.loader import load_knowledge
+from knowledge_base.vector_store import create_vector_store
+from langchain_ollama import OllamaLLM
 
 st.title("AI QA Assistant")
 
-st.write("Загрузка требований и генерация тест-кейсов")
+# -----------------------------
+# LLM для QA чата
+# -----------------------------
+
+chat_llm = OllamaLLM(model="qwen2.5:14b")
 
 
-# ---------- Чтение DOCX ----------
+# -----------------------------
+# состояние чата
+# -----------------------------
 
-def read_docx(file):
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
-    doc = Document(file)
-
-    text = "\n".join([p.text for p in doc.paragraphs])
-
-    return text
-
-
-# ---------- Чтение PDF ----------
-
-def read_pdf(file):
-
-    text = ""
-
-    with pdfplumber.open(file) as pdf:
-
-        for page in pdf.pages:
-
-            page_text = page.extract_text()
-
-            if page_text:
-                text += page_text + "\n"
-
-    return text
+if "last_result" not in st.session_state:
+    st.session_state.last_result = None
 
 
-# ---------- Создание Word отчёта ----------
-
-def create_full_report(analysis, testcases):
-
-    doc = Document()
-
-    doc.add_heading("QA Анализ требований", level=1)
-
-    # Анализ требований
-    doc.add_heading("Анализ требований", level=2)
-    doc.add_paragraph(analysis)
-
-    doc.add_heading("Тест-кейсы", level=2)
-
-    csv_buffer = StringIO(testcases)
-
-    reader = csv.reader(csv_buffer)
-
-    rows = list(reader)
-
-    if len(rows) < 2:
-
-        doc.add_paragraph("Тест-кейсы не были сгенерированы")
-
-    else:
-
-        header = rows[0]
-
-        table = doc.add_table(rows=1, cols=len(header))
-
-        for i, h in enumerate(header):
-            table.rows[0].cells[i].text = h
-
-        for r in rows[1:]:
-
-            row_cells = table.add_row().cells
-
-            for i in range(len(header)):
-
-                if i < len(r):
-                    row_cells[i].text = r[i]
-                else:
-                    row_cells[i].text = ""
-
-    buffer = BytesIO()
-
-    doc.save(buffer)
-
-    return buffer.getvalue()
-
-
-# ---------- Загрузка требований ----------
+# -----------------------------
+# загрузка требований
+# -----------------------------
 
 uploaded_file = st.file_uploader(
-    "Загрузить файл требований",
-    type=["txt", "docx", "pdf"]
+    "Загрузить требования",
+    type=["pdf", "docx", "txt"]
 )
 
 requirements_text = ""
 
 if uploaded_file:
 
-    if uploaded_file.name.endswith(".docx"):
-
-        requirements_text = read_docx(uploaded_file)
-
-    elif uploaded_file.name.endswith(".pdf"):
-
-        requirements_text = read_pdf(uploaded_file)
+    if uploaded_file.name.endswith(".pdf"):
+        requirements_text = load_pdf_text(uploaded_file)
 
     else:
-
         requirements_text = uploaded_file.read().decode("utf-8")
 
-else:
 
-    requirements_text = st.text_area(
-        "Или вставьте требования",
-        height=250
+# -----------------------------
+# загрузка knowledge base
+# -----------------------------
+
+@st.cache_resource
+def load_vector_store():
+
+    knowledge_texts = load_knowledge("knowledge")
+
+    return create_vector_store(
+        knowledge_texts
     )
 
 
-# ---------- Генерация ----------
+vector_store = load_vector_store()
 
-if st.button("Сгенерировать тест-кейсы"):
 
-    if not requirements_text.strip():
+# -----------------------------
+# запуск AI pipeline
+# -----------------------------
 
+if st.button("Анализировать"):
+
+    if not requirements_text:
         st.warning("Добавьте требования")
-
         st.stop()
 
     with st.spinner("AI анализирует требования..."):
 
         result = graph.invoke({
-            "requirements": requirements_text
+            "requirements": requirements_text,
+            "vector_store": vector_store
         })
 
-    analysis = result.get("analysis", "")
-    testcases = result.get("testcases", "")
+    if result is None:
+        st.error("AI pipeline вернул пустой результат")
+        st.stop()
 
-    # ---------- Анализ ----------
+    st.session_state.last_result = result
+
+    # -----------------------------
+    # DEBUG
+    # -----------------------------
+
+    st.subheader("DEBUG RESULT")
+    st.json(result)
+
+    # -----------------------------
+    # Анализ требований
+    # -----------------------------
 
     st.subheader("Анализ требований")
 
+    analysis = result.get(
+        "analysis",
+        "Анализ требований не был сгенерирован"
+    )
+
     st.write(analysis)
 
-    # ---------- Таблица тест-кейсов ----------
+    # -----------------------------
+    # Риски
+    # -----------------------------
+
+    st.subheader("Риски")
+
+    risks = result.get(
+        "risks",
+        "Риски не были сгенерированы"
+    )
+
+    st.write(risks)
+
+    # -----------------------------
+    # Тест-дизайн
+    # -----------------------------
+
+    st.subheader("Тест-дизайн")
+
+    test_design = result.get(
+        "test_design",
+        "Тест-дизайн отсутствует"
+    )
+
+    st.write(test_design)
+
+    # -----------------------------
+    # Тест-кейсы
+    # -----------------------------
 
     st.subheader("Тест-кейсы")
 
-    csv_buffer = StringIO(testcases)
-
-    reader = csv.reader(csv_buffer)
-
-    rows = list(reader)
-
-    df = None
-
-    if len(rows) < 2:
-
-        st.write(testcases)
-
-    else:
-
-        header = rows[0]
-
-        fixed_rows = []
-
-        for r in rows[1:]:
-
-            if len(r) < len(header):
-                r += [""] * (len(header) - len(r))
-
-            if len(r) > len(header):
-                r = r[:len(header)]
-
-            fixed_rows.append(r)
-
-        df = pd.DataFrame(fixed_rows, columns=header)
-
-        st.dataframe(df, use_container_width=True)
-
-    # ---------- Word отчёт ----------
-
-    report = create_full_report(analysis, testcases)
-
-    st.download_button(
-        label="Скачать QA отчет (Word)",
-        data=report,
-        file_name="qa_report.docx"
+    testcases = result.get(
+        "testcases",
+        "Тест-кейсы не были созданы"
     )
 
-    # ---------- Excel ----------
+    st.code(testcases)
 
-    if df is not None:
 
-        excel_buffer = BytesIO()
+# -----------------------------
+# AI QA CHAT
+# -----------------------------
 
-        with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False)
+if st.session_state.last_result:
 
-        st.download_button(
-            label="Скачать тест-кейсы (Excel)",
-            data=excel_buffer.getvalue(),
-            file_name="testcases.xlsx"
-        )
+    st.divider()
+    st.subheader("AI QA Chat — правки и уточнения")
+
+    user_message = st.chat_input(
+        "Например: добавь edge cases или перепиши тест-кейсы"
+    )
+
+    if user_message:
+
+        result = st.session_state.last_result
+
+        context = f"""
+Ты Senior QA Engineer.
+
+Текущий анализ требований:
+
+{result.get("analysis","")}
+
+Риски:
+
+{result.get("risks","")}
+
+Тест-дизайн:
+
+{result.get("test_design","")}
+
+Тест-кейсы:
+
+{result.get("testcases","")}
+
+Запрос пользователя:
+
+{user_message}
+
+Задача:
+
+Исправь или дополни результат.
+
+Можно:
+
+- улучшить анализ
+- добавить риски
+- добавить тест-кейсы
+- исправить тест-дизайн
+
+Отвечай только на русском.
+"""
+
+        response = ""
+
+        with st.chat_message("assistant"):
+
+            message_placeholder = st.empty()
+
+            for chunk in chat_llm.stream(context):
+
+                response += chunk
+                message_placeholder.markdown(response)
+
+        st.session_state.chat_history.append({
+            "role": "user",
+            "content": user_message
+        })
+
+        st.session_state.chat_history.append({
+            "role": "assistant",
+            "content": response
+        })
+
+
+# -----------------------------
+# отображение истории чата
+# -----------------------------
+
+for msg in st.session_state.chat_history:
+
+    with st.chat_message(msg["role"]):
+        st.write(msg["content"])

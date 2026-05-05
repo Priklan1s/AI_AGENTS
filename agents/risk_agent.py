@@ -1,30 +1,29 @@
 from langchain_ollama import OllamaLLM
 
-llm = OllamaLLM(model="deepseek-coder:6.7b")
+llm = OllamaLLM(model="qwen2.5:14b")
 
 def risk_agent(state):
 
-    analysis = state["analysis"]
+    requirements = state.get("structured_requirements", "")
 
     prompt = f"""
-Ты QA инженер.
+Ты QA Risk Analyst.
 
-На основе анализа требований найди риски.
+Определи тестовые риски.
 
-Сформируй:
+{requirements}
 
-1. Функциональные риски
-2. Бизнес риски
-3. Технические риски
-4. Риски данных
-5. Граничные условия
+Формат:
 
-Анализ:
-{analysis}
+Risk
+Probability
+Impact
+Mitigation
 """
 
     result = llm.invoke(prompt)
 
     return {
+        **state,
         "risks": result
     }

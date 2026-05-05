@@ -1,42 +1,35 @@
-import os
 from langchain_ollama import OllamaLLM
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-with open(os.path.join(BASE_DIR,"knowledge","test_design_rules.txt"),encoding="utf-8") as f:
-    design_rules = f.read()
-
-llm = OllamaLLM(model="deepseek-coder:6.7b")
-
+llm = OllamaLLM(model="qwen2.5:14b")
 
 def test_design_agent(state):
 
-    analysis = state["analysis"]
-    risks = state["risks"]
+    requirements = state.get("structured_requirements", "")
+    analysis = state.get("analysis", "")
 
     prompt = f"""
-Ты Senior QA инженер.
+Ты Senior QA Engineer.
 
-Используй техники тест дизайна:
+На основе требований и анализа сформируй test coverage.
 
-{design_rules}
-
-На основе анализа и рисков определи:
-
-1. Какие техники тест дизайна использовать
-2. Какие тестовые данные нужны
-3. Какие граничные условия
-4. Какие негативные сценарии
+Требования:
+{requirements}
 
 Анализ:
 {analysis}
 
-Риски:
-{risks}
+Определи:
+
+positive scenarios
+negative scenarios
+edge cases
+roles
+boundary tests
 """
 
     result = llm.invoke(prompt)
 
     return {
+        **state,
         "test_design": result
     }

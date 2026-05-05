@@ -1,11 +1,11 @@
 from langchain_ollama import OllamaLLM
 import os
-from knowledge.pdf_loader import load_pdf_text
 
-llm = OllamaLLM(model="deepseek-coder:6.7b")
+llm = OllamaLLM(
+    model="qwen2.5:14b",
+    temperature=0
+)
 
-
-# ---------- загрузка текстовых файлов ----------
 
 def load_file(path):
     with open(path, "r", encoding="utf-8") as f:
@@ -14,28 +14,10 @@ def load_file(path):
 
 BASE_PATH = os.path.dirname(os.path.dirname(__file__))
 
+QA_RULES = load_file(os.path.join(BASE_PATH, "knowledge", "qa_rules.txt"))
+TEST_DESIGN_RULES = load_file(os.path.join(BASE_PATH, "knowledge", "test_design_rules.txt"))
+TESTCASE_TEMPLATE = load_file(os.path.join(BASE_PATH, "knowledge", "testcase_template.txt"))
 
-QA_RULES = load_file(
-    os.path.join(BASE_PATH, "knowledge", "qa_rules.txt")
-)
-
-TEST_DESIGN_RULES = load_file(
-    os.path.join(BASE_PATH, "knowledge", "test_design_rules.txt")
-)
-
-TESTCASE_TEMPLATE = load_file(
-    os.path.join(BASE_PATH, "knowledge", "testcase_template.txt")
-)
-
-
-# ---------- загрузка примеров тест-кейсов из PDF ----------
-
-EXAMPLES = load_pdf_text(
-    os.path.join(BASE_PATH, "knowledge", "testcase_examples.pdf")
-)
-
-
-# ---------- агент генерации тест-кейсов ----------
 
 def testcase_agent(state):
 
@@ -43,61 +25,67 @@ def testcase_agent(state):
     analysis = state.get("analysis", "")
 
     prompt = f"""
-Ты Senior QA Engineer с большим опытом.
+Ты Senior QA Engineer.
 
-Твоя задача — создать качественные тест-кейсы на основе требований.
+Отвечай ТОЛЬКО на русском языке.
 
 Используй правила QA:
 
 {QA_RULES}
 
-Используй техники тест-дизайна:
+Используй правила тест-дизайна:
 
 {TEST_DESIGN_RULES}
 
-Используй следующий шаблон тест-кейса:
+Шаблон тест-кейсов:
 
 {TESTCASE_TEMPLATE}
 
-Примеры хороших тест-кейсов:
+---
 
-{EXAMPLES}
-
-Требования:
+ТРЕБОВАНИЯ
 
 {requirements}
 
-Анализ требований:
+---
+
+АНАЛИЗ ТРЕБОВАНИЙ
 
 {analysis}
 
-Составь тест-кейсы на основе уже согласованного покрытия.
+---
 
-Используй документ по написанию тест-кейсов test_design_rules.txt, находящийся у тебя в проекте.
+ЗАДАЧА
 
-Формат: Name / Objective / Preconditions / Steps / Expected Result / Traceability.
+Составь тест-кейсы.
 
-Используй нейтрально-технический стиль.
+Правила:
 
-Один тест = одна логическая проверка.
+• один тест = одна проверка  
+• покрыть позитивные сценарии  
+• покрыть негативные сценарии  
+• покрыть edge cases  
+• учитывать роли и права  
 
-Не придумывай отсутствующие элементы UI, сообщения и условия доступа.
+Не придумывай элементы интерфейса.
 
-Учитывай роли, права, состояния, ошибки, empty states и edge cases.
+---
 
-Финальный результат подготовь в структуре, пригодной для последующего экспорта / формирования CSV для импорта в Zephyr.
-Если возможно, сразу собери тест-кейсы как CSV-набор с отдельными колонками для всех обязательных полей.
-Строго соблюдай CSV формат.
-
-Колонки:
+ФОРМАТ CSV
 
 ID,Name,Objective,Preconditions,Steps,Expected Result,Traceability
 
-Каждый тест-кейс — новая строка.
+Steps разделяй символом |
 
-Steps разделяй символом |.
+Минимум 10 тест-кейсов.
 """
 
-    result = llm.invoke(prompt)
+    result = ""
 
-    return {"testcases": result}
+    for chunk in llm.stream(prompt):
+        result += chunk
+
+    return {
+        **state,
+        "testcases": result
+    }
