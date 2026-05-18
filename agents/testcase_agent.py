@@ -77,7 +77,7 @@ ID,Name,Objective,Preconditions,Steps,Expected Result,Traceability
 
 Steps разделяй символом |
 
-Минимум 10 тест-кейсов.
+Сделай полное тестовое покрытие тест-кейсами.
 """
 
     result = ""

@@ -5,6 +5,8 @@ from docx import Document
 from knowledge_base.loader import load_knowledge
 from knowledge_base.vector_store import create_vector_store
 from langchain_ollama import OllamaLLM
+import pandas as pd
+from io import StringIO
 
 st.title("AI QA Assistant")
 
@@ -14,6 +16,41 @@ st.title("AI QA Assistant")
 
 chat_llm = OllamaLLM(model="qwen2.5:14b")
 
+# -----------------------------
+# PROMPT для генерации CSV тест-кейсов
+# -----------------------------
+
+ZEPHYR_CSV_PROMPT = """
+Ты Senior QA Engineer.
+
+Сгенерируй тест-кейсы на основе требований.
+
+ВАЖНО:
+Верни результат СТРОГО в формате CSV.
+
+ПРАВИЛА:
+
+1. НЕ используй markdown
+2. НЕ добавляй пояснений
+3. НЕ добавляй текст до или после CSV
+4. Первая строка должна быть заголовком
+5. Разделитель — запятая
+6. Steps обязательно в кавычках
+7. Каждая строка = один тест-кейс
+8. Минимум 10 тест-кейсов
+9. Используй английские заголовки колонок
+
+ФОРМАТ CSV:
+
+ID,Name,Objective,Preconditions,Steps,Expected Result,Traceability
+
+ПРИМЕР:
+
+TC01,Edit BOM item,Verify editing BOM item,BOM opened,"1. Select item; 2. Change attribute; 3. Save",Item updated successfully,REQ-01
+TC02,Cancel editing,Verify cancel editing,BOM opened,"1. Change attribute; 2. Press cancel",Changes not saved,REQ-02
+
+Сгенерируй тест-кейсы для требований ниже.
+"""
 
 # -----------------------------
 # состояние чата
@@ -76,7 +113,7 @@ if st.button("Анализировать"):
     with st.spinner("AI анализирует требования..."):
 
         result = graph.invoke({
-            "requirements": requirements_text,
+            "requirements": ZEPHYR_CSV_PROMPT + "\n\n" + requirements_text,
             "vector_store": vector_store
         })
 
@@ -143,8 +180,75 @@ if st.button("Анализировать"):
         "Тест-кейсы не были созданы"
     )
 
+    # очистка markdown
+    testcases = testcases.replace("```csv", "")
+    testcases = testcases.replace("```", "")
+    testcases = testcases.strip()
+
     st.code(testcases)
 
+    # -----------------------------
+    # CSV экспорт для Zephyr
+    # -----------------------------
+
+    try:
+
+        csv_buffer = StringIO(testcases)
+
+        df = pd.read_csv(
+            csv_buffer,
+            quotechar='"',
+            skipinitialspace=True
+        )
+
+        st.subheader("Таблица тест-кейсов")
+
+        st.dataframe(df)
+
+        csv_data = df.to_csv(index=False)
+
+        st.download_button(
+            label="Скачать CSV для Zephyr",
+            data=csv_data,
+            file_name="zephyr_testcases.csv",
+            mime="text/csv"
+        )
+
+    except:
+
+        st.warning("AI не вернул корректный CSV формат тест-кейсов")
+
+    # -----------------------------
+    # Генерация DOCX отчёта
+    # -----------------------------
+
+    doc = Document()
+
+    doc.add_heading("AI QA Report", level=1)
+
+    doc.add_heading("1. Анализ требований", level=2)
+    doc.add_paragraph(analysis)
+
+    doc.add_heading("2. Риски", level=2)
+    doc.add_paragraph(risks)
+
+    doc.add_heading("3. Тест-дизайн", level=2)
+    doc.add_paragraph(test_design)
+
+    doc.add_heading("4. Тест-кейсы", level=2)
+    doc.add_paragraph(testcases)
+
+    from io import BytesIO
+
+    buffer = BytesIO()
+    doc.save(buffer)
+
+    st.download_button(
+        label="Скачать QA отчет",
+        data=buffer.getvalue(),
+        file_name="qa_report.docx",
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
 
 # -----------------------------
 # AI QA CHAT
